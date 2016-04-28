@@ -7,26 +7,22 @@ uint8_t spiTxBuff[2][SPI_TX_MAX] = {
 uint8_t spiRxBuff[SPI_RX_MAX];
 static volatile int spiRxCount= 0;
 
-/**
-function: SPI_Configure
-Input : SPI_periph
-Output : None
-Decription : configutre SPI, Call configuration of NVIC and DMA
-******************************************************************/
-SPI_periph SPI_Configure(eSPIperiph spiId,unsigned char *Tx_Buffer, unsigned char* Rx_Buffer,void(*rxCallback)(),void(*txCallback)())
+/************************************************************
+SPI DMA functions
+*************************************************************/
+/* configure pins used by SPI1
+         * PA4 = NSS
+	 * PA5 = SCK
+	 * PA6 = MISO
+	 * PA7 = MOSI
+*/
+
+void SPI1_Configure()
 {
-  SPI_periph spiPeriph;
-  SPI_InitTypeDef SPI_InitStruct; 
+   SPI_InitTypeDef SPI_InitStruct; 
   
-  RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOA, ENABLE);
-  SPI_ENABLE_GPIO_PIN(GPIOA, GPIO_Pin_7,GPIO_Pin_6, GPIO_Pin_5, GPIO_Pin_4);
-  SPI_AF_PIN_CONFIG(SPI1,GPIOA,GPIO_PinSource5,GPIO_PinSource6,GPIO_PinSource7);
-  	
-  //Set chip select high 
-  GPIOA->BSRRL |= GPIO_Pin_4; // set PE4 high
-	
-  // enable peripheral clock
-  RCC_APB2PeriphClockCmd(RCC_APB2Periph_SPI1, ENABLE);
+  _SPI1_Pin_Config();
+  _SPI1_interrupt_Enable();
 	
   /* configure SPI1 in Mode 0 
    * CPOL = 0 --> clock is low when idle
@@ -42,47 +38,7 @@ SPI_periph SPI_Configure(eSPIperiph spiId,unsigned char *Tx_Buffer, unsigned cha
   SPI_InitStruct.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_4; // SPI frequency is APB2 frequency / 4
   SPI_InitStruct.SPI_FirstBit = SPI_FirstBit_MSB;// data is transmitted MSB first
   SPI_Init(SPI1, &SPI_InitStruct);
-  
-  /**
-  Enable Interrupts
-  *****************************************************/
-  _SPI1_interrupt_Enable();
-  SPI_I2S_DMACmd(SPI1, SPI_I2S_DMAReq_Tx, ENABLE);
-  SPI_Cmd(SPI1, ENABLE);
-  
-  return spiPeriph;
 }
-
-/**
-This function is only used when no DMA in question
-******************************************************/
-/*void SPI1_Send(uint8_t *txBuff,int length,tSPI_Callback fct)
-{
-  int i =0;
-  
-  if (txBuff)
-  {
-    SPI_I2S_ITConfig(SPI1,SPI_I2S_IT_RXNE,ENABLE);
-    for (i=0;i<length,txBuff[i]; i++)
-    {
-      while (SPI_I2S_GetFlagStatus(SPI1,SPI_I2S_FLAG_TXE)==RESET);
-      SPI_I2S_SendData(SPI1,txBuff[i]);
-    }
-    if (fct)
-    {
-      fct();
-    }
-  }
-}*/
-/*  ***********************************************************
-SPI DMA functions
-*************************************************************/
-/* configure pins used by SPI1
-         * PA4 = NSS
-	 * PA5 = SCK
-	 * PA6 = MISO
-	 * PA7 = MOSI
-*/
 
 void _SPI1_interrupt_Enable()
 {
@@ -123,42 +79,13 @@ void _SPI1_Pin_Config()
   RCC_APB2PeriphClockCmd(RCC_APB2Periph_SPI1, ENABLE);
 }
 
-void SPI1_Configure()
-{
-   SPI_InitTypeDef SPI_InitStruct; 
-  
-  _SPI1_Pin_Config();
-  _SPI1_interrupt_Enable();
-	
-  /* configure SPI1 in Mode 0 
-   * CPOL = 0 --> clock is low when idle
-   * CPHA = 0 --> data is sampled at the first edge
-   */
-  SPI_StructInit(&SPI_InitStruct); // set default settings 
-  SPI_InitStruct.SPI_Direction = SPI_Direction_2Lines_FullDuplex; // set to full duplex mode, seperate MOSI and MISO lines
-  SPI_InitStruct.SPI_Mode = SPI_Mode_Master;     // transmit in master mode, NSS pin has to be always high
-  SPI_InitStruct.SPI_DataSize = SPI_DataSize_8b; // one packet of data is 8 bits wide
-  SPI_InitStruct.SPI_CPOL = SPI_CPOL_Low;        // clock is low when idle
-  SPI_InitStruct.SPI_CPHA = SPI_CPHA_1Edge;      // data sampled at first edge
-  SPI_InitStruct.SPI_NSS = SPI_NSS_Soft ; // set the NSS management to internal and pull internal NSS high
-  SPI_InitStruct.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_4; // SPI frequency is APB2 frequency / 4
-  SPI_InitStruct.SPI_FirstBit = SPI_FirstBit_MSB;// data is transmitted MSB first
-  SPI_Init(SPI1, &SPI_InitStruct);
-}
 
 
-void SPI1_Start()
+void SPI1_Send(uint8_t *txBuff,int length,tSPI_Callback fct)
 {
    SPI_I2S_DMACmd(SPI1, SPI_I2S_DMAReq_Tx, ENABLE);
    SPI_Cmd(SPI1, ENABLE);
-}
-void SPI1_Send(uint8_t *txBuff,int length,tSPI_Callback fct)
-{
-  
-}
-
-void SPI1_Receive()
-{
+   SPI1_DMA2_Start(txBuff);
 }
 
 void SPI1_Stop()
@@ -183,19 +110,6 @@ DMA2
 Channel3, Stream2: SPI1_RX
 Channel3, Stream5: SPI1_TX
 */
-void SPI1_DMA2_Enable_TC_Interrupts()
-{
-  NVIC_InitTypeDef NVIC_InitStructure;
-   
-  NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
-  NVIC_InitStructure.NVIC_IRQChannel = DMA2_Stream5_IRQn;
-  NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
-  NVIC_InitStructure.NVIC_IRQChannelSubPriority = 3;
-  NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
-  NVIC_Init(&NVIC_InitStructure);
-  DMA_ITConfig(DMA2_Stream5, DMA_IT_TC, ENABLE);
-  return;
-}
 
 void SPI1_DMA2_Configure()
 {
@@ -219,7 +133,7 @@ void SPI1_DMA2_Configure()
   DMA_InitStructure.DMA_FIFOMode  = DMA_FIFOMode_Disable;
 
   DMA_Init(DMA2_Stream5, &DMA_InitStructure);
-  SPI1_DMA2_Enable_TC_Interrupts();
+  _SPI1_DMA2_Enable_TC_Interrupts();
   return;  
 }
 
@@ -230,13 +144,23 @@ void SPI1_DMA2_Start(unsigned char * buff)
   return;
 }
 
+void _SPI1_DMA2_Enable_TC_Interrupts()
+{
+  NVIC_InitTypeDef NVIC_InitStructure;
+   
+  NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
+  NVIC_InitStructure.NVIC_IRQChannel = DMA2_Stream5_IRQn;
+  NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
+  NVIC_InitStructure.NVIC_IRQChannelSubPriority = 3;
+  NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+  NVIC_Init(&NVIC_InitStructure);
+  DMA_ITConfig(DMA2_Stream5, DMA_IT_TC, ENABLE);
+  return;
+}
+
 void _SPI1_DMA2_Stop()
 {
-  //if (DMA2->) 
-  //{
-    DMA_ClearFlag(DMA2_Stream5,DMA_FLAG_FEIF2|DMA_FLAG_DMEIF2|DMA_FLAG_TEIF2|DMA_FLAG_HTIF2|DMA_FLAG_TCIF2);
-    DMA_Cmd(DMA2_Stream5, DISABLE);
-    //while (DMA2_Stream5->CR & DMA_SxCR_EN);
-    //DMA_DeInit(DMA2_Stream5);
-  //}
+  DMA_ClearFlag(DMA2_Stream5,DMA_FLAG_FEIF2|DMA_FLAG_DMEIF2|DMA_FLAG_TEIF2|DMA_FLAG_HTIF2|DMA_FLAG_TCIF2);
+  DMA_Cmd(DMA2_Stream5, DISABLE);
+  return;
 }
